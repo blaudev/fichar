@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "Fichar Bot",
+  "version": "1.0.0",
+  "description": "Bot de fichaje automático con integración Google Calendar",
+  "permissions": ["alarms", "storage", "tabs", "scripting", "identity"],
+  "host_permissions": ["https://presence.addingplus.net/*"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "oauth2": {
+    "client_id": "523728795855-cg4jklhdcc2kka904jer38fu0s6nivm6.apps.googleusercontent.com",
+    "scopes": ["https://www.googleapis.com/auth/calendar"]
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

@@ -1,0 +1,65 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Generar iconos</title>
+  </head>
+  <body>
+    <p>Haz clic en cada botón para descargar el icono</p>
+    <script>
+      function createIcon(size) {
+        const canvas = document.createElement("canvas");
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext("2d");
+
+        // Background circle
+        ctx.fillStyle = "#2563eb";
+        ctx.beginPath();
+        ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Clock face
+        ctx.fillStyle = "white";
+        ctx.beginPath();
+        ctx.arc(size / 2, size / 2, size * 0.35, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Clock hands
+        ctx.strokeStyle = "#2563eb";
+        ctx.lineWidth = Math.max(1, size * 0.06);
+        ctx.lineCap = "round";
+
+        // Hour hand
+        ctx.beginPath();
+        ctx.moveTo(size / 2, size / 2);
+        ctx.lineTo(size / 2, size * 0.25);
+        ctx.stroke();
+
+        // Minute hand
+        ctx.beginPath();
+        ctx.moveTo(size / 2, size / 2);
+        ctx.lineTo(size * 0.65, size * 0.4);
+        ctx.stroke();
+
+        // Center dot
+        ctx.fillStyle = "#2563eb";
+        ctx.beginPath();
+        ctx.arc(size / 2, size / 2, size * 0.05, 0, Math.PI * 2);
+        ctx.fill();
+
+        return canvas;
+      }
+
+      [16, 48, 128].forEach((size) => {
+        const canvas = createIcon(size);
+        const link = document.createElement("a");
+        link.download = `icon${size}.png`;
+        link.href = canvas.toDataURL("image/png");
+        link.textContent = `Descargar icon${size}.png`;
+        link.style.display = "block";
+        link.style.margin = "8px";
+        document.body.appendChild(link);
+      });
+    </script>
+  </body>
+</html>

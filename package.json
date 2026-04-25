@@ -1,0 +1,27 @@
+{
+  "name": "fichar-web-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Bot de navegador con Playwright que ejecuta login y acciones periodicas",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "google-auth": "tsx src/google-auth.ts",
+    "generate-calendar": "tsx src/generate-calendar.ts",
+    "generate-calendar:clear": "tsx src/generate-calendar.ts --clear",
+    "test:clockout-step": "tsx src/test-clockout-step.ts"
+  },
+  "dependencies": {
+    "dotenv": "^17.3.1",
+    "googleapis": "^171.4.0",
+    "node-cron": "^4.2.1",
+    "playwright": "^1.58.2"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.3",
+    "@types/node-cron": "^3.0.11",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}
