@@ -1,0 +1,14 @@
+{
+  "name": "fichar-bot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Fichaje automático stateless para GitHub Actions (Playwright)",
+  "scripts": {
+    "fichar": "node fichar.mjs",
+    "dry-run": "DRY_RUN=1 node fichar.mjs"
+  },
+  "dependencies": {
+    "playwright": "^1.58.2"
+  }
+}

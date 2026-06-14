@@ -23,15 +23,9 @@ const phaseNext = {
 
 async function refresh() {
   const response = await chrome.runtime.sendMessage({ type: "getStatus" });
-  const { state, hasConfig, logs, weekLog } = response;
+  const { state, logs, weekLog } = response;
 
   const badge = document.getElementById("statusBadge");
-
-  if (!hasConfig) {
-    badge.textContent = "Sin configurar";
-    badge.className = "status-badge status-no-config";
-    return;
-  }
 
   if (!state) {
     badge.textContent = "Día libre";
@@ -113,10 +107,6 @@ document.getElementById("btnGoogle").addEventListener("click", async () => {
   } else {
     alert("✅ Google Calendar autorizado");
   }
-});
-
-document.getElementById("btnOptions").addEventListener("click", () => {
-  chrome.runtime.openOptionsPage();
 });
 
 document.getElementById("btnGenerate").addEventListener("click", async () => {

@@ -1,9 +1,0 @@
-{
-  "date": "2026-03-05",
-  "phase": "clocked-in",
-  "clockInTime": "2026-03-05T07:04:41.000Z",
-  "pauseTime": "2026-03-05T11:55:00.000Z",
-  "resumeTime": "2026-03-05T12:25:00.000Z",
-  "clockOutTime": "2026-03-05T15:35:00.000Z",
-  "clockInTimestamp": 1741155881000
-}

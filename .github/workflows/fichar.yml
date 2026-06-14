@@ -1,0 +1,40 @@
+name: Fichar
+
+on:
+  # Cron en UTC. El script decide según la hora real de Madrid (maneja el horario
+  # de verano), así que basta con cubrir holgadamente las ventanas en UTC.
+  #   entrada ~08:00 Madrid -> 06:00/07:00 UTC
+  #   pausa/reanudar ~13:00 Madrid -> 11:00/12:00 UTC
+  #   salida ~16:30-17:00 Madrid -> 14:30/15:30 UTC
+  schedule:
+    - cron: "*/5 5-8,10-17 * * 1-5"
+  workflow_dispatch: {}
+
+# Evita que dos ejecuciones solapadas fichen a la vez
+concurrency:
+  group: fichar
+  cancel-in-progress: false
+
+jobs:
+  fichar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Instalar dependencias
+        working-directory: bot
+        run: |
+          npm install
+          npx playwright install --with-deps chromium
+
+      - name: Fichar
+        working-directory: bot
+        env:
+          PORTAL_USER: ${{ secrets.PORTAL_USER }}
+          PORTAL_PASS: ${{ secrets.PORTAL_PASS }}
+        run: node fichar.mjs

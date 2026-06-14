@@ -111,29 +111,41 @@ async function saveDayState(state) {
 }
 
 // ── Config ───────────────────────────────────────────────────
-const DEFAULT_CONFIG = {
-  loginUrl: "https://presence.addingplus.net/default.aspx",
+// Portal "Presence" (SPA). Cada acción = pulsar button.attendanceBtn con cierto
+// TEXTO y confirmar en un modal con otro texto (a veces distinto, p.ej. Finish->End).
+// Valores fijos: no hay página de configuración.
+const CONFIG = {
+  loginUrl: "https://portalempleado.addingplus.net/",
   user: "52274153Y",
   pass: "tonTin-40",
-  userSelector: 'input[name="username"]',
-  passSelector: 'input[name="pwd"]',
-  submitSelector: 'button[id="btnEntrar"]',
-  clockInSelector: "#ContentPlaceHolder1_ucUsuariosFichaje_User1_btnIniciar",
-  clockInConfirmSelector: "#ContentPlaceHolder1_ucUsuariosFichaje_User1_ucFichajeUser1_btnIniciar",
-  pauseSelector: "#ContentPlaceHolder1_ucUsuariosFichaje_User1_btnParar",
-  pauseConfirmSelector: "#ContentPlaceHolder1_ucUsuariosFichaje_User1_ucFichajeUser1_btnParar",
-  resumeSelector: "#ContentPlaceHolder1_ucUsuariosFichaje_User1_btnReanudar",
-  resumeConfirmSelector: "#ContentPlaceHolder1_ucUsuariosFichaje_User1_ucFichajeUser1_btnReanudar",
-  clockOutSelector: "#ContentPlaceHolder1_ucUsuariosFichaje_User1_btnFinalizar",
-  clockOutConfirmSelector: "#ContentPlaceHolder1_ucUsuariosFichaje_User1_ucFichajeUser1_btnFinalizar",
-  reopenSelector: "#ContentPlaceHolder1_ucUsuariosFichaje_User1_btnReabrir",
+  // Login: el SPA no usa name/id. Usuario = primer input que no es checkbox ni password.
+  userSelector: "input:not([type=checkbox]):not([type=password])",
+  passSelector: 'input[type="password"]',
+  submitText: "Enter",
+  forceLang: "EN",
+  // Fichaje
+  attendanceBtnSelector: "button.attendanceBtn",
+  modalSelector: ".modal-content",
+  clockInButton: "Start",
+  clockInConfirm: "Start",
+  pauseButton: "Break",
+  pauseConfirm: "Break",
+  resumeButton: "Resume",
+  resumeConfirm: "Resume",
+  clockOutButton: "Finish",
+  clockOutConfirm: "End",
+  reopenButton: "Reopen",
+  reopenConfirm: "Reopen",
+  // Textos de estado (junto a "Status:") para verificar/detectar la fase
+  statusNotStarted: "Not started",
+  statusInProgress: "In progress",
+  statusOnBreak: "On break",
+  statusEnded: "Ended",
   postActionWait: 3000,
 };
 
 async function getConfig() {
-  const { config } = await storageGet("config");
-  // Always return defaults merged with any overrides from options
-  return { ...DEFAULT_CONFIG, ...config };
+  return CONFIG;
 }
 
 // ── Google Calendar ──────────────────────────────────────────
@@ -279,161 +291,217 @@ async function executeInTab(tabId, func, args = []) {
   }
 }
 
-async function waitForTabReady(tabId, maxWait = 15000) {
-  const start = Date.now();
-  while (Date.now() - start < maxWait) {
-    try {
-      const tab = await chrome.tabs.get(tabId);
-      if (tab.status === "complete" && tab.url && !tab.url.startsWith("chrome://")) {
-        return true;
-      }
-    } catch {
-      return false;
+// ── Funciones inyectadas en la página (deben ser autónomas) ──────────────
+
+// Login: rellena usuario/contraseña (compatible con inputs controlados por React)
+// y pulsa el botón cuyo texto coincide con submitText. Si no hay campo de
+// contraseña, asume que ya hay sesión iniciada.
+function injectedLogin(user, pass, userSel, passSel, submitText) {
+  function setNativeValue(el, value) {
+    const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto, "value").set;
+    setter.call(el, value);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+  const passInput = document.querySelector(passSel);
+  if (!passInput) return { alreadyLoggedIn: true };
+  const userInput = document.querySelector(userSel);
+  if (userInput) setNativeValue(userInput, user);
+  setNativeValue(passInput, pass);
+  const btn = [...document.querySelectorAll("button")].find(
+    (b) => (b.textContent || "").trim().toLowerCase() === submitText.toLowerCase(),
+  );
+  if (btn) btn.click();
+  return { alreadyLoggedIn: false, submitFound: !!btn, userFound: !!userInput };
+}
+
+// Lee el texto de estado ("Not started", "In progress", "On break", "Ended")
+function injectedGetStatus() {
+  const el = [...document.querySelectorAll("*")].find(
+    (n) => n.children.length === 0 && /Status:/i.test(n.textContent || ""),
+  );
+  const txt = el?.parentElement?.textContent?.replace(/\s+/g, " ").trim() || "";
+  return txt.replace(/.*Status:\s*/i, "");
+}
+
+// Lista los textos de los botones de fichaje visibles
+function injectedAttendanceButtons(btnSel) {
+  return [...document.querySelectorAll(btnSel)]
+    .filter((b) => b.offsetParent !== null || b.offsetWidth > 0)
+    .map((b) => (b.textContent || "").trim());
+}
+
+// Pulsa el botón de fichaje cuyo texto coincide
+function injectedClickAttendance(btnSel, text) {
+  const btn = [...document.querySelectorAll(btnSel)].find(
+    (b) => (b.textContent || "").trim().toLowerCase() === text.toLowerCase(),
+  );
+  if (!btn) return false;
+  btn.click();
+  return true;
+}
+
+// Indica si el botón de confirmación del modal está realmente visible
+// (offsetParent considera ancestros ocultos, evita falsos positivos)
+function injectedModalButtonVisible(modalSel, text) {
+  const root = document.querySelector(modalSel);
+  if (!root) return false;
+  const btn = [...root.querySelectorAll("button, a")].find(
+    (b) => (b.textContent || "").trim().toLowerCase() === text.toLowerCase(),
+  );
+  if (!btn) return false;
+  const style = getComputedStyle(btn);
+  return (btn.offsetParent !== null || btn.offsetWidth > 0) && style.display !== "none" && style.visibility !== "hidden";
+}
+
+// Pulsa el botón de confirmación (por texto) dentro del modal
+function injectedClickModalConfirm(modalSel, text) {
+  const root = document.querySelector(modalSel);
+  if (!root) return false;
+  const btn = [...root.querySelectorAll("button, a")].find(
+    (b) => (b.textContent || "").trim().toLowerCase() === text.toLowerCase(),
+  );
+  if (!btn) return false;
+  btn.click();
+  return true;
+}
+
+// Fuerza el idioma del portal (mejor esfuerzo)
+function injectedForceLang(target) {
+  const toggle = document.querySelector("button.lang-toggle");
+  if (!toggle) return "no-toggle";
+  if ((toggle.textContent || "").trim().toUpperCase() === target.toUpperCase()) return "already";
+  toggle.click();
+  const item = [...document.querySelectorAll(".lang-item")].find(
+    (i) => (i.textContent || "").trim().toUpperCase() === target.toUpperCase(),
+  );
+  if (item) {
+    item.click();
+    return "switched";
+  }
+  return "item-not-found";
+}
+
+// ── Orquestación de acciones ────────────────────────────────────────────
+
+// Abre el portal en una pestaña, hace login si hace falta y espera a que cargue
+// el panel de fichaje. Devuelve el tabId.
+async function openPortalLoggedIn(config) {
+  const tab = await chrome.tabs.create({ url: config.loginUrl, active: false });
+  const tabId = tab.id;
+  await waitForTabLoad(tabId);
+  await sleep(1500);
+
+  const res = await executeInTab(tabId, injectedLogin, [
+    config.user,
+    config.pass,
+    config.userSelector,
+    config.passSelector,
+    config.submitText,
+  ]);
+  if (res?.alreadyLoggedIn) {
+    await log("   🔑 Sesión ya activa");
+  } else {
+    await log(`   🔑 Login enviado (user=${res?.userFound}, submit=${res?.submitFound})`);
+  }
+
+  // Esperar a que aparezca el panel de fichaje (los botones attendanceBtn)
+  await waitForSelector(tabId, config.attendanceBtnSelector, 20000);
+  await sleep(config.postActionWait || 3000);
+
+  // Forzar idioma (mejor esfuerzo)
+  if (config.forceLang) {
+    const r = await executeInTab(tabId, injectedForceLang, [config.forceLang]);
+    if (r === "switched") {
+      await sleep(config.postActionWait || 3000);
+      await waitForSelector(tabId, config.attendanceBtnSelector, 15000);
+      await log(`   🌐 Idioma forzado a ${config.forceLang}`);
     }
+  }
+  return tabId;
+}
+
+// Espera a que un botón de fichaje con cierto texto esté presente
+async function waitForAttendanceButton(tabId, btnSel, text, timeout = 15000) {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    const texts = await executeInTab(tabId, injectedAttendanceButtons, [btnSel]);
+    if ((texts || []).some((t) => t.toLowerCase() === text.toLowerCase())) return true;
     await sleep(500);
   }
   return false;
 }
 
-async function performAction(phase, actionSelector, confirmSelector, verifySelector, secondConfirmOptional = false) {
+async function getPageStatus(tabId) {
+  return (await executeInTab(tabId, injectedGetStatus, [])) || "";
+}
+
+// Ejecuta una acción de fichaje: pulsa el botón con `buttonText`, confirma en el
+// modal con `confirmText` y verifica que el estado pasa a contener `expectedStatus`.
+async function performAction(phase, buttonText, confirmText, expectedStatus) {
   const config = await getConfig();
   if (!config) throw new Error("No hay configuración guardada. Abre Opciones.");
 
   await log(`   Ejecutando acción: ${phase}`);
-
-  // Open tab and login
-  const tab = await chrome.tabs.create({ url: config.loginUrl, active: false });
-  const tabId = tab.id;
-
-  // Wait for page to load
-  await waitForTabLoad(tabId);
-  await sleep(1000);
-
-  // Login
-  await executeInTab(
-    tabId,
-    (user, pass, userSel, passSel, submitSel) => {
-      const userInput = document.querySelector(userSel);
-      const passInput = document.querySelector(passSel);
-      const submitBtn = document.querySelector(submitSel);
-      if (userInput) {
-        userInput.value = user;
-        userInput.dispatchEvent(new Event("input", { bubbles: true }));
-      }
-      if (passInput) {
-        passInput.value = pass;
-        passInput.dispatchEvent(new Event("input", { bubbles: true }));
-      }
-      if (submitBtn) submitBtn.click();
-    },
-    [config.user, config.pass, config.userSelector, config.passSelector, config.submitSelector],
-  );
-
-  await waitForTabLoad(tabId);
   const wait = config.postActionWait || 3000;
-  await sleep(wait);
-  await log("   🔑 Login completado");
+  const tabId = await openPortalLoggedIn(config);
 
-  // Click main action button
-  const clicked = await executeInTab(
-    tabId,
-    (sel) => {
-      const el = document.querySelector(sel);
-      if (!el) return false;
-      el.click();
-      return true;
-    },
-    [actionSelector],
-  );
-
-  if (!clicked) {
-    await captureTab(tabId, phase);
-    await chrome.tabs.remove(tabId);
-    throw new Error(`Botón no encontrado: ${actionSelector}`);
-  }
-
-  // Wait for confirm button to appear (ASP.NET partial postback)
-  await log("   ✔️ Esperando botón de confirmación...");
-  await log(`   🔍 Buscando selector: ${confirmSelector}`);
-  const confirmed = await waitForSelector(tabId, confirmSelector, 15000);
-
-  if (!confirmed) {
-    // Diagnostic: dump all buttons/links on the page
-    const diag = await executeInTab(tabId, () => {
-      const els = [...document.querySelectorAll("a, button, input[type='submit'], input[type='button']")];
-      return els
-        .filter((e) => e.offsetParent !== null || e.offsetWidth > 0)
-        .slice(0, 30)
-        .map((e) => ({
-          tag: e.tagName,
-          id: e.id,
-          text: (e.textContent || "").trim().substring(0, 50),
-          href: e.href ? e.href.substring(0, 80) : null,
-          display: getComputedStyle(e).display,
-        }));
-    }, []);
-    await log(`   🔍 Elementos visibles en página: ${JSON.stringify(diag, null, 2)}`);
-    await captureTab(tabId, `${phase}-confirm1`);
-    await chrome.tabs.remove(tabId);
-    throw new Error(`Botón de confirmación no encontrado: ${confirmSelector}`);
-  }
-
-  await sleep(500); // brief settle before clicking
-  await log("   ✔️ Confirmando...");
-  await executeInTab(
-    tabId,
-    (sel) => {
-      const el = document.querySelector(sel);
-      if (el) el.click();
-    },
-    [confirmSelector],
-  );
-
-  // Wait for second confirm button (may or may not appear)
-  const confirmed2 = await waitForSelector(tabId, confirmSelector, 10000);
-
-  if (confirmed2) {
-    await sleep(500);
-    await log("   ✔️ Segunda confirmación...");
-    await executeInTab(
-      tabId,
-      (sel) => {
-        const el = document.querySelector(sel);
-        if (el) el.click();
-      },
-      [confirmSelector],
-    );
-  } else if (!secondConfirmOptional) {
-    await captureTab(tabId, `${phase}-confirm2`);
-    await chrome.tabs.remove(tabId);
-    throw new Error(`Botón de segunda confirmación no encontrado: ${confirmSelector}`);
-  } else {
-    await log("   ℹ️ Segunda confirmación no encontrada, continuando...");
-  }
-
-  await waitForTabLoad(tabId);
-  await sleep(wait);
-
-  // Verify next state
-  if (verifySelector) {
-    const verified = await executeInTab(
-      tabId,
-      (sel) => {
-        const btn = document.querySelector(sel);
-        return btn ? true : false;
-      },
-      [verifySelector],
-    );
-
-    if (verified) {
-      await log("   ✅ Verificado: botón del siguiente estado visible");
-    } else {
-      await captureTab(tabId, `${phase}-verify`);
-      await log("   ⚠️ Verificación fallida: botón del siguiente estado no encontrado");
+  try {
+    // Botón principal
+    const hasBtn = await waitForAttendanceButton(tabId, config.attendanceBtnSelector, buttonText, 15000);
+    if (!hasBtn) {
+      const texts = await executeInTab(tabId, injectedAttendanceButtons, [config.attendanceBtnSelector]);
+      await log(`   🔍 Botones disponibles: ${JSON.stringify(texts)}`);
+      await captureTab(tabId, phase);
+      throw new Error(`Botón de acción no encontrado: "${buttonText}"`);
     }
-  }
+    await executeInTab(tabId, injectedClickAttendance, [config.attendanceBtnSelector, buttonText]);
 
-  await chrome.tabs.remove(tabId);
+    // Esperar a que el botón de confirmación del modal esté visible
+    let confirmReady = false;
+    const modalStart = Date.now();
+    while (Date.now() - modalStart < 15000) {
+      if (await executeInTab(tabId, injectedModalButtonVisible, [config.modalSelector, confirmText])) {
+        confirmReady = true;
+        break;
+      }
+      await sleep(500);
+    }
+    if (!confirmReady) {
+      await captureTab(tabId, `${phase}-modal`);
+      throw new Error(`El modal de confirmación ("${confirmText}") no apareció`);
+    }
+    await sleep(400);
+
+    await log(`   ✔️ Confirmando con "${confirmText}"...`);
+    const confirmed = await executeInTab(tabId, injectedClickModalConfirm, [config.modalSelector, confirmText]);
+    if (!confirmed) {
+      await captureTab(tabId, `${phase}-confirm`);
+      throw new Error(`Botón de confirmación "${confirmText}" no encontrado en el modal`);
+    }
+
+    await sleep(wait);
+
+    // Verificar el nuevo estado
+    if (expectedStatus) {
+      let ok = false;
+      for (let i = 0; i < 5 && !ok; i++) {
+        const status = await getPageStatus(tabId);
+        if (status.toLowerCase().includes(expectedStatus.toLowerCase())) {
+          ok = true;
+          await log(`   ✅ Verificado: estado "${status}"`);
+        } else if (i === 4) {
+          await captureTab(tabId, `${phase}-verify`);
+          await log(`   ⚠️ Verificación: esperado "${expectedStatus}", estado actual "${status}"`);
+        } else {
+          await sleep(1000);
+        }
+      }
+    }
+  } finally {
+    await chrome.tabs.remove(tabId);
+  }
 }
 
 function waitForTabLoad(tabId) {
@@ -531,7 +599,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
     if (alarm.name === ALARM_CLOCK_IN && state.phase === "started") {
       await log("🟢 Fichando entrada...");
-      await performAction("clockin", config.clockInSelector, config.clockInConfirmSelector, config.pauseSelector, true);
+      await performAction("clockin", config.clockInButton, config.clockInConfirm, config.statusInProgress);
       state.phase = "clocked-in";
       state.clockInTimestamp = Date.now();
       await saveDayState(state);
@@ -539,21 +607,21 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
       await scheduleRemainingAlarms(state);
     } else if (alarm.name === ALARM_PAUSE && state.phase === "clocked-in") {
       await log("⏸️ Pausando...");
-      await performAction("pause", config.pauseSelector, config.pauseConfirmSelector, config.resumeSelector);
+      await performAction("pause", config.pauseButton, config.pauseConfirm, config.statusOnBreak);
       state.phase = "paused";
       await saveDayState(state);
       await log("   ✅ Pausa registrada");
       await scheduleRemainingAlarms(state);
     } else if (alarm.name === ALARM_RESUME && state.phase === "paused") {
       await log("▶️ Retomando...");
-      await performAction("resume", config.resumeSelector, config.resumeConfirmSelector, config.clockOutSelector);
+      await performAction("resume", config.resumeButton, config.resumeConfirm, config.statusInProgress);
       state.phase = "resumed";
       await saveDayState(state);
       await log("   ✅ Reanudación registrada");
       await scheduleRemainingAlarms(state);
     } else if (alarm.name === ALARM_CLOCK_OUT && state.phase === "resumed") {
       await log("🔴 Fichando salida...");
-      await performAction("clockout", config.clockOutSelector, config.clockOutConfirmSelector, config.reopenSelector);
+      await performAction("clockout", config.clockOutButton, config.clockOutConfirm, config.statusEnded);
       state.phase = "clocked-out";
       await saveDayState(state);
       await log("   ✅ Salida registrada");
@@ -575,131 +643,46 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   }
 });
 
-// ── Detect real phase from website ───────────────────────────
-async function detectRealPhase() {
+// ── Detect real state from website ───────────────────────────
+// Devuelve un "bucket" de estado según el texto de "Status:":
+//   "not-started" | "in-progress" | "on-break" | "ended" | null
+// Nota: "in-progress" es ambiguo (puede ser tras la entrada o tras reanudar),
+// por eso se devuelve el bucket y la reconciliación con la fase guardada se
+// hace en reconcilePhase().
+async function detectRealState() {
   const config = await getConfig();
   if (!config) return null;
 
-  await log("   🔍 Detectando fase real en la web...");
+  await log("   🔍 Detectando estado real en la web...");
 
   let tabId;
   try {
-    const tab = await chrome.tabs.create({ url: config.loginUrl, active: false });
-    tabId = tab.id;
+    tabId = await openPortalLoggedIn(config);
 
-    // Wait until tab is fully loaded and ready
-    const ready = await waitForTabReady(tabId);
-    await log(`   🔍 Tab ready: ${ready}`);
-    const tabInfo = await chrome.tabs.get(tabId);
-    await log(`   🔍 Tab status: ${tabInfo.status}, url: ${tabInfo.url}`);
-    await sleep(2000);
-
-    // Login
-    const loginResult = await executeInTab(
-      tabId,
-      (user, pass, userSel, passSel, submitSel) => {
-        const userInput = document.querySelector(userSel);
-        const passInput = document.querySelector(passSel);
-        const submitBtn = document.querySelector(submitSel);
-        const debug = {
-          userFound: !!userInput,
-          passFound: !!passInput,
-          submitFound: !!submitBtn,
-          url: window.location.href,
-          userSel,
-          passSel,
-          submitSel,
-        };
-        if (userInput) {
-          userInput.value = user;
-          userInput.dispatchEvent(new Event("input", { bubbles: true }));
-          userInput.dispatchEvent(new Event("change", { bubbles: true }));
-        }
-        if (passInput) {
-          passInput.value = pass;
-          passInput.dispatchEvent(new Event("input", { bubbles: true }));
-          passInput.dispatchEvent(new Event("change", { bubbles: true }));
-        }
-        if (submitBtn) submitBtn.click();
-        return debug;
-      },
-      [config.user, config.pass, config.userSelector, config.passSelector, config.submitSelector],
-    );
-
-    await log(
-      `   🔍 Login debug: user=${loginResult?.userFound}, pass=${loginResult?.passFound}, submit=${loginResult?.submitFound}`,
-    );
-    await log(`   🔍 URL pre-login: ${loginResult?.url}`);
-    await log(
-      `   🔍 Selectores: user="${loginResult?.userSel}" pass="${loginResult?.passSel}" submit="${loginResult?.submitSel}"`,
-    );
-
-    // Wait for navigation after login - try multiple strategies
-    await waitForTabLoad(tabId);
-    const wait = config.postActionWait || 3000;
-    await sleep(wait);
-
-    // Check if we're still on the login page
-    const postLoginUrl = await executeInTab(tabId, () => window.location.href, []);
-    await log(`   🔍 URL post-login: ${postLoginUrl}`);
-
-    // Check which button is visible (retry up to 5 times for async ASP.NET loading)
-    const selectorList = [
-      { selector: config.clockInSelector, phase: "started" },
-      { selector: config.pauseSelector, phase: "clocked-in" },
-      { selector: config.resumeSelector, phase: "paused" },
-      { selector: config.clockOutSelector, phase: "resumed" },
-      { selector: config.reopenSelector, phase: "clocked-out" },
-    ];
-
-    let visibleButton = null;
+    let statusText = "";
     for (let attempt = 0; attempt < 5; attempt++) {
-      if (attempt > 0) await sleep(2000);
-
-      visibleButton = await executeInTab(
-        tabId,
-        (selectors) => {
-          const results = [];
-          for (const { selector, phase } of selectors) {
-            const btn = document.querySelector(selector);
-            if (btn) {
-              const visible =
-                btn.offsetParent !== null || btn.offsetWidth > 0 || getComputedStyle(btn).display !== "none";
-              results.push({ phase, selector, found: true, visible });
-              if (visible) return { phase, debug: results };
-            } else {
-              results.push({ phase, selector, found: false, visible: false });
-            }
-          }
-          return { phase: null, debug: results };
-        },
-        [selectorList],
-      );
-
-      if (visibleButton?.phase) break;
-
-      // Log debug info on each failed attempt
-      const debugInfo = visibleButton?.debug || [];
-      const summary = debugInfo.map((d) => `${d.phase}:${d.found ? (d.visible ? "✓" : "hidden") : "✗"}`).join(" | ");
-      await log(`   🔍 Intento ${attempt + 1}/5: ${summary || "sin resultados"}`);
+      statusText = await getPageStatus(tabId);
+      if (statusText) break;
+      await sleep(1500);
     }
-
-    // Log current URL for debugging
-    const currentUrl = await executeInTab(tabId, () => window.location.href, []);
-    await log(`   🔍 URL actual: ${currentUrl}`);
+    const btns = await executeInTab(tabId, injectedAttendanceButtons, [config.attendanceBtnSelector]);
+    await log(`   🔍 Status="${statusText}" botones=${JSON.stringify(btns)}`);
 
     await chrome.tabs.remove(tabId);
     tabId = null;
 
-    const detectedPhase = visibleButton?.phase || null;
-    if (detectedPhase) {
-      await log(`   🔍 Fase real detectada: '${detectedPhase}'`);
-    } else {
-      await log("   ⚠️ No se pudo detectar la fase (ningún botón encontrado)");
-    }
-    return detectedPhase;
+    const s = (statusText || "").toLowerCase();
+    let bucket = null;
+    if (s.includes(config.statusNotStarted.toLowerCase())) bucket = "not-started";
+    else if (s.includes(config.statusOnBreak.toLowerCase())) bucket = "on-break";
+    else if (s.includes(config.statusEnded.toLowerCase())) bucket = "ended";
+    else if (s.includes(config.statusInProgress.toLowerCase())) bucket = "in-progress";
+
+    if (bucket) await log(`   🔍 Estado real detectado: '${bucket}'`);
+    else await log("   ⚠️ No se pudo detectar el estado");
+    return bucket;
   } catch (err) {
-    await log(`   ⚠️ Error detectando fase real: ${err?.message || err}`);
+    await log(`   ⚠️ Error detectando estado real: ${err?.message || err}`);
     if (tabId) {
       try {
         await chrome.tabs.remove(tabId);
@@ -707,6 +690,22 @@ async function detectRealPhase() {
     }
     return null;
   }
+}
+
+// Mapea un bucket de estado a la fase representativa.
+// "in-progress" abarca tanto 'clocked-in' como 'resumed': si la fase guardada ya
+// encaja en el bucket se respeta; si no, se usa la representativa.
+function reconcilePhase(bucket, savedPhase) {
+  const buckets = {
+    "not-started": ["started"],
+    "in-progress": ["clocked-in", "resumed"],
+    "on-break": ["paused"],
+    ended: ["clocked-out"],
+  };
+  const valid = buckets[bucket];
+  if (!valid) return savedPhase || null;
+  if (savedPhase && valid.includes(savedPhase)) return savedPhase;
+  return valid[0];
 }
 
 // ── Daily check: runs at 7:55 every weekday ──────────────────
@@ -723,10 +722,11 @@ async function dailyCheck() {
   if (existing) {
     // Always verify saved phase against real website state
     try {
-      const realPhase = await detectRealPhase();
-      if (realPhase && realPhase !== existing.phase) {
-        await log(`   ⚠️ Fase guardada '${existing.phase}' difiere de la real '${realPhase}', actualizando`);
-        existing.phase = realPhase;
+      const bucket = await detectRealState();
+      const reconciled = reconcilePhase(bucket, existing.phase);
+      if (reconciled && reconciled !== existing.phase) {
+        await log(`   ⚠️ Fase guardada '${existing.phase}' difiere de la real '${reconciled}', actualizando`);
+        existing.phase = reconciled;
         await saveDayState(existing);
       }
     } catch (err) {
@@ -760,8 +760,9 @@ async function dailyCheck() {
   // Detect real phase from the website
   let realPhase = "started";
   try {
-    const detected = await detectRealPhase();
-    if (detected) realPhase = detected;
+    const bucket = await detectRealState();
+    const reconciled = reconcilePhase(bucket, null);
+    if (reconciled) realPhase = reconciled;
   } catch (err) {
     await log(`   ⚠️ No se pudo detectar fase, asumiendo 'started': ${err?.message || err}`);
   }
@@ -844,6 +845,9 @@ async function scheduleRemainingAlarms(state) {
 chrome.runtime.onInstalled.addListener(async () => {
   await log("🔧 Extensión instalada/actualizada");
 
+  // Limpiar config antigua que pudiera quedar en storage (ya no se usa)
+  await chrome.storage.local.remove("config");
+
   // Set up daily check alarm at 7:55 every day
   await chrome.alarms.create(ALARM_CHECK, {
     when: getNext755().getTime(),
@@ -892,10 +896,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "getStatus") {
     (async () => {
       const state = await loadDayState();
-      const config = await getConfig();
       const { logs = [] } = await storageGet("logs");
       const weekLog = await loadWeekLog();
-      sendResponse({ state, hasConfig: !!config, logs: logs.slice(-30), weekLog });
+      sendResponse({ state, logs: logs.slice(-30), weekLog });
     })();
     return true; // async response
   }
