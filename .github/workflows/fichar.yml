@@ -6,7 +6,7 @@ on:
   # verano +2). Solo se ejecuta alrededor de los 3 momentos de fichaje, cada 15 min.
   schedule:
     - cron: "*/15 6-7 * * 1-5" # entrada (~08:00-08:15 Madrid)
-    - cron: "*/15 11-12 * * 1-5" # pausa y reanudación (~13:00-13:55 Madrid)
+    - cron: "*/15 11-13 * * 1-5" # pausa y reanudación (~13:00-14:00 Madrid)
     - cron: "*/15 14-17 * * 1-5" # salida (~16:30-17:15 Madrid)
   workflow_dispatch: {}
 
