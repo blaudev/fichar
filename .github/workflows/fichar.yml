@@ -2,12 +2,12 @@ name: Fichar
 
 on:
   # Cron en UTC. El script decide según la hora real de Madrid (maneja el horario
-  # de verano), así que basta con cubrir holgadamente las ventanas en UTC.
-  #   entrada ~08:00 Madrid -> 06:00/07:00 UTC
-  #   pausa/reanudar ~13:00 Madrid -> 11:00/12:00 UTC
-  #   salida ~16:30-17:00 Madrid -> 14:30/15:30 UTC
+  # de verano), por eso cada franja cubre las dos posibles horas UTC (invierno +1,
+  # verano +2). Solo se ejecuta alrededor de los 3 momentos de fichaje, cada 15 min.
   schedule:
-    - cron: "*/5 5-8,10-17 * * 1-5"
+    - cron: "*/15 6-7 * * 1-5" # entrada (~08:00-08:15 Madrid)
+    - cron: "*/15 11-12 * * 1-5" # pausa y reanudación (~13:00-13:55 Madrid)
+    - cron: "*/15 14-17 * * 1-5" # salida (~16:30-17:15 Madrid)
   workflow_dispatch: {}
 
 # Evita que dos ejecuciones solapadas fichen a la vez

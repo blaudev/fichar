@@ -23,8 +23,9 @@ y festivos (`HOLIDAYS` en `bot/fichar.mjs`).
    se exponen aunque el repo sea público.
 3. **Habilita Actions** (pestaña Actions) si está deshabilitado.
 
-El workflow `.github/workflows/fichar.yml` corre cada 5 min L-V en las ventanas
-horarias. Puedes lanzarlo a mano con **Actions → Fichar → Run workflow**.
+El workflow `.github/workflows/fichar.yml` corre cada 15 min L-V solo en las tres
+franjas de fichaje (entrada, pausa/reanudación, salida). Puedes lanzarlo a mano con
+**Actions → Fichar → Run workflow**.
 
 ## Detener el fichaje (vacaciones, etc.)
 
