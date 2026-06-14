@@ -50,18 +50,30 @@ function fmtMin(m) {
   return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 }
 
-// Horario objetivo del día (minutos desde medianoche), con jitter diario
+const FULL_DAY_MIN = 8 * 60; // jornada máxima: 8 h trabajadas, NUNCA más
+
+// Objetivo de ENTRADA/PAUSA/REANUDACIÓN por reloj (con jitter diario).
 function targetsFor(dateISO) {
   const clockIn = 8 * 60 + (seed(dateISO) % 16); // 08:00–08:15
   const pause = 13 * 60 + (seed(dateISO + "p") % 16); // 13:00–13:15
   const resume = pause + 25 + (seed(dateISO + "b") % 16); // pausa de 25–40 min
-  const morning = pause - clockIn;
-  const clockOut = resume + Math.max(8 * 60 - morning, 0); // completar ~8 h
-  return { clockIn, pause, resume, clockOut };
+  return { clockIn, pause, resume };
 }
 
-// Decide la acción según estado real + hora. Devuelve null si no toca nada.
-function decide(status, t, T) {
+// Objetivo de horas TRABAJADAS para la salida: 8 h menos un margen aleatorio
+// diario (15–35 min). La salida se decide leyendo las horas reales del portal,
+// así que la jornada queda siempre por debajo de 8 h.
+function workedTargetMin(dateISO) {
+  const margin = 15 + (seed(dateISO + "o") % 21); // 15–35 min menos de 8 h
+  return FULL_DAY_MIN - margin; // 7h25–7h45
+}
+
+// Hora límite de seguridad (Madrid): si no se pudieron leer las horas trabajadas,
+// se cierra igualmente para no dejar la jornada abierta.
+const SAFETY_CLOCKOUT_MIN = 18 * 60; // 18:00
+
+// Decide la acción según estado real + hora + horas trabajadas. null si no toca.
+function decide(status, t, T, workedMin, workedTarget) {
   const s = status.toLowerCase();
   const notStarted = s.includes("not started");
   const inProgress = s.includes("in progress");
@@ -76,8 +88,13 @@ function decide(status, t, T) {
   if (onBreak && t >= T.resume) {
     return { name: "Reanudar", button: "Resume", confirm: "Resume", expect: "In progress" };
   }
-  if (inProgress && t >= T.clockOut) {
+  // Salida: cuando las horas trabajadas reales alcanzan el objetivo (< 8 h).
+  if (inProgress && workedMin != null && workedMin >= workedTarget) {
     return { name: "Salida", button: "Finish", confirm: "End", expect: "Ended" };
+  }
+  // Red de seguridad: si no se leyeron las horas y es muy tarde, cerrar igual.
+  if (inProgress && workedMin == null && t >= SAFETY_CLOCKOUT_MIN) {
+    return { name: "Salida (seguridad)", button: "Finish", confirm: "End", expect: "Ended" };
   }
   return null;
 }
@@ -115,6 +132,32 @@ async function readStatus(page) {
   });
 }
 
+// Lee "Worked hours" (HH:MM:SS) de la tabla resumen y lo devuelve en minutos.
+// Devuelve null si no se puede leer.
+async function readWorkedMinutes(page) {
+  const raw = await page.evaluate(() => {
+    for (const t of document.querySelectorAll("table")) {
+      if (!/Worked hours/i.test(t.textContent || "")) continue;
+      const rows = [...t.querySelectorAll("tr")];
+      let headers = [];
+      let values = [];
+      for (const r of rows) {
+        const cells = [...r.querySelectorAll("th,td")].map((c) => c.textContent.trim());
+        if (cells.some((c) => /Worked hours/i.test(c))) headers = cells;
+        else if (cells.some((c) => /^-?\d{1,2}:\d{2}:\d{2}$/.test(c))) values = cells;
+      }
+      const idx = headers.findIndex((h) => /Worked hours/i.test(h));
+      if (idx >= 0 && values[idx]) return values[idx];
+    }
+    return null;
+  });
+  if (!raw) return null;
+  const m = raw.match(/^(-?)(\d{1,2}):(\d{2}):(\d{2})$/);
+  if (!m) return null;
+  const sign = m[1] === "-" ? -1 : 1;
+  return sign * (Number(m[2]) * 60 + Number(m[3]) + Number(m[4]) / 60);
+}
+
 async function doAction(page, action) {
   const btn = page.locator("button.attendanceBtn", { hasText: new RegExp(`^\\s*${action.button}\\s*$`, "i") }).first();
   if (!(await btn.count())) throw new Error(`Botón "${action.button}" no encontrado`);
@@ -133,7 +176,8 @@ async function doAction(page, action) {
 async function main() {
   const { dateISO, minutes, weekday } = madridNow();
   const T = targetsFor(dateISO);
-  console.log(`📅 ${dateISO} (Madrid) ${fmtMin(minutes)} | objetivos: entrada ${fmtMin(T.clockIn)}, pausa ${fmtMin(T.pause)}, reanudar ${fmtMin(T.resume)}, salida ${fmtMin(T.clockOut)}`);
+  const wTarget = workedTargetMin(dateISO);
+  console.log(`📅 ${dateISO} (Madrid) ${fmtMin(minutes)} | objetivos: entrada ${fmtMin(T.clockIn)}, pausa ${fmtMin(T.pause)}, reanudar ${fmtMin(T.resume)}, salida al trabajar ${fmtMin(wTarget)} (máx 8h)`);
 
   const isWorkday = weekday >= 1 && weekday <= 5 && !HOLIDAYS.has(dateISO);
   if (!isWorkday && !DRY_RUN) {
@@ -146,9 +190,10 @@ async function main() {
   try {
     await login(page);
     const status = await readStatus(page);
-    console.log(`🔎 Estado actual en el portal: "${status}"`);
+    const workedMin = await readWorkedMinutes(page);
+    console.log(`🔎 Estado: "${status}" | trabajado: ${workedMin == null ? "?" : fmtMin(Math.round(workedMin))}`);
 
-    const action = decide(status, minutes, T);
+    const action = decide(status, minutes, T, workedMin, wTarget);
     if (!action) {
       console.log("⏸️ No toca ninguna acción ahora.");
       return;

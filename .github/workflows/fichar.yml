@@ -7,7 +7,7 @@ on:
   schedule:
     - cron: "*/15 6-7 * * 1-5" # entrada (~08:00-08:15 Madrid)
     - cron: "*/15 11-13 * * 1-5" # pausa y reanudación (~13:00-14:00 Madrid)
-    - cron: "*/15 14-17 * * 1-5" # salida (~16:30-17:15 Madrid)
+    - cron: "*/5 14-17 * * 1-5" # salida: cada 5 min para ceñir el corte a <8h
   workflow_dispatch: {}
 
 # Evita que dos ejecuciones solapadas fichen a la vez

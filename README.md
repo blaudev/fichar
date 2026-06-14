@@ -9,9 +9,12 @@ depender de tu equipo. En cada ejecución hace login, lee el estado real del por
 la acción que toque. No guarda estado entre ejecuciones: el portal es la fuente de
 verdad, así que es idempotente (no ficha dos veces aunque el cron dispare varias).
 
-El horario lo genera el propio script con variación diaria (entrada ~08:00-08:15,
-pausa ~13:00-13:15 de 25-40 min, salida para completar ~8 h). Salta fines de semana
-y festivos (`HOLIDAYS` en `bot/fichar.mjs`).
+El horario lo genera el propio script con variación diaria: entrada ~08:00-08:15,
+pausa ~13:00-13:15 de 25-40 min. La **salida** no va por reloj: el script lee las
+**horas trabajadas reales** del portal y ficha la salida cuando alcanzan un objetivo
+aleatorio diario de **7h25-7h45** (8 h menos un margen). Así la jornada queda siempre
+algo por debajo de 8 h y **nunca las supera**. Salta fines de semana y festivos
+(`HOLIDAYS` en `bot/fichar.mjs`).
 
 ## Puesta en marcha
 
@@ -49,7 +52,8 @@ DRY_RUN=1 PORTAL_USER=XXXX PORTAL_PASS=YYYY npm run dry-run
 - El cron de GitHub Actions **no es puntual**: puede retrasarse varios minutos y, en
   horas punta, algún día podría no ejecutarse. Para "fichar sobre las 8:00" es
   aceptable, pero no tan fiable como un cron propio (Raspberry Pi / VPS).
-- No compensa el descuadre semanal de los viernes (cada día apunta a ~8 h).
+- Cada día apunta a ~7h25-7h45 trabajadas (nunca más de 8 h). No compensa el
+  cómputo semanal entre días.
 
 ## Estructura
 
