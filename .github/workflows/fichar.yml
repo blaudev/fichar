@@ -5,9 +5,10 @@ on:
   # de verano), por eso cada franja cubre las dos posibles horas UTC (invierno +1,
   # verano +2). Solo se ejecuta alrededor de los 3 momentos de fichaje, cada 15 min.
   schedule:
-    - cron: "*/15 6-7 * * 1-5" # entrada (~08:00-08:15 Madrid)
-    - cron: "*/15 11-13 * * 1-5" # pausa y reanudación (~13:00-14:00 Madrid)
-    - cron: "*/5 14-17 * * 1-5" # salida: cada 5 min para ceñir el corte a <8h
+    # Minutos en off-hour (no en punto) para reducir el retraso de los cron de GitHub.
+    - cron: "7,22,37,52 6-7 * * 1-5" # entrada (~08:00-08:15 Madrid)
+    - cron: "7,22,37,52 11-13 * * 1-5" # pausa y reanudación (~13:00-14:00 Madrid)
+    - cron: "3,8,13,18,23,28,33,38,43,48,53,58 14-17 * * 1-5" # salida: ~cada 5 min para ceñir el corte a <8h
   workflow_dispatch: {}
 
 # Evita que dos ejecuciones solapadas fichen a la vez
